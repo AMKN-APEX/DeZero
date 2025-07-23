@@ -74,9 +74,9 @@ class Variable:
     def cleargrad(self): # 同じ変数を使って複数回違う計算を行う際に使う初期化メソッド
         self.grad = None
 
-    def backward(self, retain_grad=False):
+    def backward(self, retain_grad=False, create_graph=False):
         if self.grad is None:
-            self.grad = np.ones_like(self.data) # dataと同じ大きさの全要素1の行列を作成
+            self.grad = Variable(np.ones_like(self.data)) # dataと同じ大きさの全要素1の行列を作成
 
         funcs = []
         seen_set = set()
@@ -92,18 +92,20 @@ class Variable:
         while funcs:
             f = funcs.pop() # 関数を取得
             gys = [output().grad for output in f.outputs] # funcごとの出力側のgradをリスト化、()はweakrefの影響
-            gxs = f.backward(*gys) # リスト化されたgradをアンパックして、funcのbackwardからfuncの入力側のgradを得る
-            if not isinstance(gxs, tuple):
-                gxs = (gxs,) # funcの入力側のgradをタプル化
-            
-            for x, gx in zip(f.inputs, gxs):
-                if x.grad is None: # funcの入力側のgradに何もなければ、そのまま
-                    x.grad = gx
-                else: # funcの入力側のgradが既に存在していれば、 足し合わせる(同じ変数が足されたときにこの事案発生)
-                    x.grad = x.grad + gx
 
-                if x.creator is not None:
-                    add_func(x.creator)
+            with using_config('enable_backprop', create_graph):
+                gxs = f.backward(*gys) # リスト化されたgradをアンパックして、funcのbackwardからfuncの入力側のgradを得る
+                if not isinstance(gxs, tuple):
+                    gxs = (gxs,) # funcの入力側のgradをタプル化
+            
+                for x, gx in zip(f.inputs, gxs):
+                    if x.grad is None: # funcの入力側のgradに何もなければ、そのまま
+                        x.grad = gx
+                    else: # funcの入力側のgradが既に存在していれば、 足し合わせる(同じ変数が足されたときにこの事案発生)
+                        x.grad = x.grad + gx
+
+                    if x.creator is not None:
+                        add_func(x.creator)
         
             if not retain_grad: # gradをすべて保持するかどうか
                 for y in f.outputs:
@@ -168,7 +170,7 @@ class Mul(Function): # MulクラスはFunctionクラスを継承
         return y
     
     def backward(self, gy):
-        x0, x1 = self.inputs[0].data, self.inputs[1].data
+        x0, x1 = self.inputs
         return gy * x1, gy * x0
 
 def mul(x0, x1):
@@ -207,7 +209,7 @@ class Div(Function): # DivクラスはFunctionクラスを継承
         return y
 
     def backward(self, gy):
-        x0, x1 = self.inputs[0].data, self.inputs[1].data
+        x0, x1 = self.inputs
         gx0 = gy / x1
         gx1 = gy * (-x0 / x1 ** 2)
         return gx0, gx1
@@ -229,9 +231,8 @@ class Pow(Function): # PowクラスはFunctionクラスを継承
         return y
 
     def backward(self, gy):
-        x = self.inputs[0].data
+        x, = self.inputs
         c = self.c
-
         gx = c * x ** (c - 1) * gy
         return gx
 

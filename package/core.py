@@ -1,6 +1,7 @@
 import weakref
 import numpy as np
 import contextlib
+import package.functions
 
 # =============================================================================
 # Config
@@ -110,6 +111,26 @@ class Variable:
             if not retain_grad: # gradをすべて保持するかどうか
                 for y in f.outputs:
                     y().grad = None # yはweakref
+    
+    def reshape(self, *shape):
+        if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
+            shape = shape[0]
+        return package.functions.reshape(self, shape)
+
+    def transpose(self, *axes):
+        if len(axes) == 0:
+            axes = None
+        elif len(axes) == 1:
+            if isinstance(axes[0], (tuple, list)) or axes[0] is None:
+                axes = axes[0]
+        return package.functions.transpose(self, axes)
+    
+    @property
+    def T(self):
+        return package.functions.transpose(self)
+    
+    def sum(self, axis=None, keepdims=False):
+        return package.functions.sum(self, axis, keepdims)
 
 # np.ndarray以外の数字の型をnp.ndarrayに変換する便利関数 (Numpyの仕様上入れないと仕方ない)
 def as_array(x):
@@ -154,11 +175,16 @@ class Function:
 
 class Add(Function): # AddクラスはFunctionクラスを継承
     def forward(self, x0, x1):
+        self.x0_shape, self.x1_shape = x0.shape, x1.shape
         y = x0 + x1
         return y
     
     def backward(self, gy):
-        return gy, gy
+        gx0, gx1 = gy, gy
+        if self.x0_shape != self.x1_shape:  # for broadcaset
+            gx0 = package.functions.sum_to(gx0, self.x0_shape)
+            gx1 = package.functions.sum_to(gx1, self.x1_shape)
+        return gx0, gx1
 
 def add(x0, x1):
     x1 = as_array(x1)
@@ -171,7 +197,12 @@ class Mul(Function): # MulクラスはFunctionクラスを継承
     
     def backward(self, gy):
         x0, x1 = self.inputs
-        return gy * x1, gy * x0
+        gx0 = gy * x1
+        gx1 = gy * x0
+        if x0.shape != x1.shape:  # for broadcast
+            gx0 = package.functions.sum_to(gx0, x0.shape)
+            gx1 = package.functions.sum_to(gx1, x1.shape)
+        return gx0, gx1
 
 def mul(x0, x1):
     x1 = as_array(x1)
@@ -193,7 +224,12 @@ class Sub(Function): # SubクラスはFunctionクラスを継承
         return y
 
     def backward(self, gy):
-        return gy, -gy
+        gx0 = gy
+        gx1 = -gy
+        if self.x0_shape != self.x1_shape:  # for broadcast
+            gx0 = package.functions.sum_to(gx0, self.x0_shape)
+            gx1 = package.functions.sum_to(gx1, self.x1_shape)
+        return gx0, gx1
 
 def sub(x0, x1):
     x1 = as_array(x1)
@@ -212,6 +248,9 @@ class Div(Function): # DivクラスはFunctionクラスを継承
         x0, x1 = self.inputs
         gx0 = gy / x1
         gx1 = gy * (-x0 / x1 ** 2)
+        if x0.shape != x1.shape:  # for broadcast
+            gx0 = package.functions.sum_to(gx0, x0.shape)
+            gx1 = package.functions.sum_to(gx1, x1.shape)
         return gx0, gx1
 
 def div(x0, x1):

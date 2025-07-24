@@ -5,5 +5,6 @@ from DeZero.package.core import no_grad
 from DeZero.package.core import as_array
 from DeZero.package.core import as_variable
 from DeZero.package.core import setup_variable
+from DeZero.package.core import Config
 
 setup_variable()

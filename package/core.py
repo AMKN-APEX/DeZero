@@ -1,7 +1,7 @@
 import weakref
 import numpy as np
 import contextlib
-import package.functions
+import package
 
 # =============================================================================
 # Config
@@ -132,6 +132,9 @@ class Variable:
     def sum(self, axis=None, keepdims=False):
         return package.functions.sum(self, axis, keepdims)
 
+class Parameter(Variable): # Variableクラスの継承
+    pass
+
 # np.ndarray以外の数字の型をnp.ndarrayに変換する便利関数 (Numpyの仕様上入れないと仕方ない)
 def as_array(x):
     if np.isscalar(x):
@@ -218,8 +221,9 @@ class Neg(Function): # NegクラスはFunctionクラスを継承
 def neg(x):
     return Neg()(x)
 
-class Sub(Function): # SubクラスはFunctionクラスを継承
+class Sub(Function):
     def forward(self, x0, x1):
+        self.x0_shape, self.x1_shape = x0.shape, x1.shape
         y = x0 - x1
         return y
 
@@ -237,7 +241,7 @@ def sub(x0, x1):
 
 def rsub(x0, x1):
     x1 = as_array(x1)
-    return sub(x1, x0)
+    return Sub()(x1, x0)
 
 class Div(Function): # DivクラスはFunctionクラスを継承
     def forward(self, x0, x1):
@@ -289,3 +293,4 @@ def setup_variable(): # 基本演算の設定
     Variable.__truediv__ = div
     Variable.__rtruediv__ = rdiv
     Variable.__pow__ = pow
+    Variable.__getitem__ = package.functions.get_item

@@ -1,6 +1,7 @@
 import numpy as np
+import package
 from package import utils
-from package.core import Function, as_variable
+from package.core import Variable, Function, as_variable, as_array
 
 # =============================================================================
 # Basic functions: sin / cos / tanh / exp / log
@@ -109,7 +110,6 @@ class Transpose(Function):
 def transpose(x, axes=None):
     return Transpose(axes)(x)
 
-
 class GetItem(Function):
     def __init__(self, slices):
         self.slices = slices
@@ -123,41 +123,26 @@ class GetItem(Function):
         f = GetItemGrad(self.slices, x.shape)
         return f(gy)
 
-
 class GetItemGrad(Function):
     def __init__(self, slices, in_shape):
         self.slices = slices
         self.in_shape = in_shape
 
     def forward(self, gy):
-        xp = dezero.cuda.get_array_module(gy)
-        gx = xp.zeros(self.in_shape, dtype=gy.dtype)
+        gx = np.zeros(self.in_shape, dtype=gy.dtype)
 
-        if xp is np:
+        if np is np:
             np.add.at(gx, self.slices, gy)
         else:
-            xp.scatter_add(gx, self.slices, gy)
+            np.scatter_add(gx, self.slices, gy)
         return gx
 
     def backward(self, ggx):
         return get_item(ggx, self.slices)
 
-
 def get_item(x, slices):
     f = GetItem(slices)
     return f(x)
-
-
-def expand_dims(x, axis):
-    x = as_variable(x)
-    shape = list(x.shape)
-    shape.insert(axis, 1)
-    return reshape(x, tuple(shape))
-
-
-def flatten(x):
-    """Flattens the input. Does not affect the batch size."""
-    return reshape(x, (x.shape[0], -1))
 
 # =============================================================================
 # sum / sum_to / broadcast_to / average / matmul / linear
@@ -216,15 +201,12 @@ def broadcast_to(x, shape):
         return as_variable(x)
     return BroadcastTo(shape)(x)
 
-
 def average(x, axis=None, keepdims=False):
     x = as_variable(x)
     y = sum(x, axis, keepdims)
     return y * (y.data.size / x.data.size)
 
-
 mean = average
-
 
 class MatMul(Function):
     def forward(self, x, W):
@@ -237,10 +219,8 @@ class MatMul(Function):
         gW = matmul(x.T, gy)
         return gx, gW
 
-
 def matmul(x, W):
     return MatMul()(x, W)
-
 
 class Linear(Function):
     def forward(self, x, W, b):
@@ -256,10 +236,8 @@ class Linear(Function):
         gW = matmul(x.T, gy)
         return gx, gW, gb
 
-
 def linear(x, W, b=None):
     return Linear()(x, W, b)
-
 
 def linear_simple(x, W, b=None):
     t = matmul(x, W)
@@ -269,3 +247,112 @@ def linear_simple(x, W, b=None):
     y = t + b
     t.data = None  # Release t.data (ndarray) for memory efficiency
     return y
+
+# =============================================================================
+# activation function: sigmoid / relu / softmax / log_softmax / leaky_relu
+# =============================================================================
+class Sigmoid(Function):
+    def forward(self, x):
+        # y = 1 / (1 + xp.exp(-x))
+        y = np.tanh(x * 0.5) * 0.5 + 0.5  # Better implementation
+        return y
+
+    def backward(self, gy):
+        y = self.outputs[0]()
+        gx = gy * y * (1 - y)
+        return gx
+
+def sigmoid(x):
+    return Sigmoid()(x)
+
+class ReLU(Function):
+    def forward(self, x):
+        y = np.maximum(x, 0.0)
+        return y
+
+    def backward(self, gy):
+        x, = self.inputs
+        mask = x.data > 0
+        gx = gy * mask
+        return gx
+
+def relu(x):
+    return ReLU()(x)
+
+class Softmax(Function):
+    def __init__(self, axis=1):
+        self.axis = axis
+
+    def forward(self, x):
+        y = x - x.max(axis=self.axis, keepdims=True)
+        y = np.exp(y)
+        y /= y.sum(axis=self.axis, keepdims=True)
+        return y
+
+    def backward(self, gy):
+        y = self.outputs[0]()
+        gx = y * gy
+        sumdx = gx.sum(axis=self.axis, keepdims=True)
+        gx -= y * sumdx
+        return gx
+
+def softmax(x, axis=1):
+    return Softmax(axis)(x)
+
+# =============================================================================
+# loss function: mean_squared_error / softmax_cross_entropy / sigmoid_cross_entropy / binary_cross_entropy
+# =============================================================================
+
+class MeanSquaredError(Function):
+    def forward(self, x0, x1):
+        diff = x0 - x1
+        y = (diff ** 2).sum() / len(diff)
+        return y
+
+    def backward(self, gy):
+        x0, x1 = self.inputs
+        diff = x0 - x1
+        gx0 = gy * diff * (2. / len(diff))
+        gx1 = -gx0
+        return gx0, gx1
+
+
+def mean_squared_error(x0, x1):
+    return MeanSquaredError()(x0, x1)
+
+class SoftmaxCrossEntropy(Function):
+    def forward(self, x, t):
+        N = x.shape[0]
+        log_z = utils.logsumexp(x, axis=1)
+        log_p = x - log_z
+        log_p = log_p[np.arange(N), t.ravel()]
+        y = -log_p.sum() / np.float32(N)
+        return y
+
+    def backward(self, gy):
+        x, t = self.inputs
+        N, CLS_NUM = x.shape
+
+        gy *= 1/N
+        y = softmax(x)
+        # convert to one-hot
+        t_onehot = np.eye(CLS_NUM, dtype=t.dtype)[t.data]
+        y = (y - t_onehot) * gy
+        return y
+
+def softmax_cross_entropy(x, t):
+    return SoftmaxCrossEntropy()(x, t)
+
+# =============================================================================
+# accuracy / dropout / batch_norm / embed_id
+# =============================================================================
+def accuracy(y, t):
+    """
+    [WAR] This function is not differentiable.
+    """
+    y, t = as_variable(y), as_variable(t)
+
+    pred = y.data.argmax(axis=1).reshape(t.shape)
+    result = (pred == t.data)
+    acc = result.mean()
+    return Variable(as_array(acc))

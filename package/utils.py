@@ -1,6 +1,6 @@
 import os
 import subprocess
-# import urllib.request
+import urllib.request
 import numpy as np
 from package.core import as_variable
 from package.core import Variable
@@ -155,17 +155,14 @@ def reshape_sum_backward(gy, x_shape, axis, keepdims):
     gy = gy.reshape(shape)  # reshape
     return gy
 
-
 def logsumexp(x, axis=1):
-    xp = cuda.get_array_module(x)
     m = x.max(axis=axis, keepdims=True)
     y = x - m
-    xp.exp(y, out=y)
+    np.exp(y, out=y)
     s = y.sum(axis=axis, keepdims=True)
-    xp.log(s, out=s)
+    np.log(s, out=s)
     m += s
     return m
-
 
 def max_backward_shape(x, axis):
     if axis is None:

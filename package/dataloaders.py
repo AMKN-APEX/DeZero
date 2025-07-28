@@ -5,7 +5,6 @@ try:
 except:
     pil_available = False
 import numpy as np
-# from package import cuda
 
 
 class DataLoader:

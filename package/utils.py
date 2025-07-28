@@ -4,7 +4,6 @@ import urllib.request
 import numpy as np
 from package.core import as_variable
 from package.core import Variable
-# from package import cuda
 
 
 # =============================================================================
@@ -225,7 +224,6 @@ def gradient_check(f, x, *args, rtol=1e-4, atol=1e-5, **kwargs):
         print(' values: {} ...'.format(val[1:-1]))
     return res
 
-
 def numerical_grad(f, x, *args, **kwargs):
     """Computes numerical gradient by finite differences.
 
@@ -244,14 +242,8 @@ def numerical_grad(f, x, *args, **kwargs):
     eps = 1e-4
 
     x = x.data if isinstance(x, Variable) else x
-    xp = cuda.get_array_module(x)
-    if xp is not np:
-        np_x = cuda.as_numpy(x)
-    else:
-        np_x = x
-    grad = xp.zeros_like(x)
-
-    it = np.nditer(np_x, flags=['multi_index'], op_flags=['readwrite'])
+    grad = np.zeros_like(x)
+    it = np.nditer(x, flags=['multi_index'], op_flags=['readwrite'])
     while not it.finished:
         idx = it.multi_index
         tmp_val = x[idx].copy()
@@ -275,7 +267,6 @@ def numerical_grad(f, x, *args, **kwargs):
         it.iternext()
     return grad
 
-
 def array_equal(a, b):
     """True if two arrays have the same shape and elements, False otherwise.
 
@@ -288,9 +279,7 @@ def array_equal(a, b):
     """
     a = a.data if isinstance(a, Variable) else a
     b = b.data if isinstance(b, Variable) else b
-    a, b = cuda.as_numpy(a), cuda.as_numpy(b)
     return np.array_equal(a, b)
-
 
 def array_allclose(a, b, rtol=1e-4, atol=1e-5):
     """Returns True if two arrays(or variables) are element-wise equal within a
@@ -308,9 +297,7 @@ def array_allclose(a, b, rtol=1e-4, atol=1e-5):
     """
     a = a.data if isinstance(a, Variable) else a
     b = b.data if isinstance(b, Variable) else b
-    a, b = cuda.as_numpy(a), cuda.as_numpy(b)
     return np.allclose(a, b, atol=atol, rtol=rtol)
-
 
 # =============================================================================
 # download function

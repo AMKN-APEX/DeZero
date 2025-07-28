@@ -36,53 +36,74 @@ if '__file__' in globals():
     import os, sys
     sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
+import numpy as np
+import matplotlib.pyplot as plt
 import package
+from package import Model
+from package import SeqDataLoader
 import package.functions as F
-from package import optimizers
-from package import DataLoader
-from package.models import MLP
+import package.layers as L
 
 
-max_epoch = 5
-batch_size = 100
-hidden_size = 1000
+max_epoch = 100
+batch_size = 30
+hidden_size = 100
+bptt_length = 30
 
-train_set = package.datasets.MNIST(train=True)
-test_set = package.datasets.MNIST(train=False)
-train_loader = DataLoader(train_set, batch_size)
-test_loader = DataLoader(test_set, batch_size, shuffle=False)
+train_set = package.datasets.SinCurve(train=True)
+dataloader = SeqDataLoader(train_set, batch_size=batch_size)
+seqlen = len(train_set)
 
-# model = MLP((hidden_size, 10))
-# optimizer = optimizers.SGD().setup(model)
-model = MLP((hidden_size, hidden_size, 10), activation=F.relu)
-optimizer = optimizers.Adam().setup(model)
+
+class BetterRNN(Model):
+    def __init__(self, hidden_size, out_size):
+        super().__init__()
+        self.rnn = L.LSTM(hidden_size)
+        self.fc = L.Linear(out_size)
+
+    def reset_state(self):
+        self.rnn.reset_state()
+
+    def __call__(self, x):
+        y = self.rnn(x)
+        y = self.fc(y)
+        return y
+
+model = BetterRNN(hidden_size, 1)
+optimizer = package.optimizers.Adam().setup(model)
 
 for epoch in range(max_epoch):
-    sum_loss, sum_acc = 0, 0
+    model.reset_state()
+    loss, count = 0, 0
 
-    for x, t in train_loader:
+    for x, t in dataloader:
         y = model(x)
-        loss = F.softmax_cross_entropy(y, t)
-        acc = F.accuracy(y, t)
-        model.cleargrads()
-        loss.backward()
-        optimizer.update()
+        loss += F.mean_squared_error(y, t)
+        count += 1
 
-        sum_loss += float(loss.data) * len(t)
-        sum_acc += float(acc.data) * len(t)
+        if count % bptt_length == 0 or count == seqlen:
+            model.cleargrads()
+            loss.backward()
+            loss.unchain_backward()
+            optimizer.update()
+    avg_loss = float(loss.data) / count
+    print('| epoch %d | loss %f' % (epoch + 1, avg_loss))
 
-    print('epoch: {}'.format(epoch+1))
-    print('train loss: {:.4f}, accuracy: {:.4f}'.format(
-        sum_loss / len(train_set), sum_acc / len(train_set)))
+# Plot
+xs = np.cos(np.linspace(0, 4 * np.pi, 1000))
+model.reset_state()
+pred_list = []
 
-    sum_loss, sum_acc = 0, 0
-    with package.no_grad():
-        for x, t in test_loader:
-            y = model(x)
-            loss = F.softmax_cross_entropy(y, t)
-            acc = F.accuracy(y, t)
-            sum_loss += float(loss.data) * len(t)
-            sum_acc += float(acc.data) * len(t)
+with package.no_grad():
+    for x in xs:
+        x = np.array(x).reshape(1, 1)
+        y = model(x)
+        pred_list.append(float(y.data))
 
-    print('test loss: {:.4f}, accuracy: {:.4f}'.format(
-        sum_loss / len(test_set), sum_acc / len(test_set)))
+plt.plot(np.arange(len(xs)), xs, label='y=cos(x)')
+plt.plot(np.arange(len(xs)), pred_list, label='predict')
+plt.xlabel('x')
+plt.ylabel('y')
+plt.legend()
+plt.show()
+

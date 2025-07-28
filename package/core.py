@@ -9,6 +9,7 @@ import package
 
 class Config:
     enable_backprop = True # 逆伝播有効モード
+    train = True # 学習モード
 
 @contextlib.contextmanager
 def using_config(name, value):
@@ -21,6 +22,9 @@ def using_config(name, value):
 
 def no_grad():
     return using_config('enable_backprop', False)
+
+def test_mode():
+    return using_config('train', False)
 
 # =============================================================================
 # Variable / Function
@@ -71,6 +75,9 @@ class Variable:
     def set_creator(self, func):
         self.creator = func
         self.generation = func.generation + 1
+    
+    def unchain(self):
+        self.creator = None
 
     def cleargrad(self): # 同じ変数を使って複数回違う計算を行う際に使う初期化メソッド
         self.grad = None
@@ -111,6 +118,16 @@ class Variable:
             if not retain_grad: # gradをすべて保持するかどうか
                 for y in f.outputs:
                     y().grad = None # yはweakref
+    
+    def unchain_backward(self):
+        if self.creator is not None:
+            funcs = [self.creator]
+            while funcs:
+                f = funcs.pop()
+                for x in f.inputs:
+                    if x.creator is not None:
+                        funcs.append(x.creator)
+                        x.unchain()
     
     def reshape(self, *shape):
         if len(shape) == 1 and isinstance(shape[0], (tuple, list)):
